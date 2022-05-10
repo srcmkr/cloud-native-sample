@@ -1,4 +1,5 @@
 ﻿using Dapr.Client;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OrdersService.Configuration;
 using OrdersService.Data.Repositories;
@@ -8,6 +9,7 @@ using Swashbuckle.AspNetCore.Annotations;
 
 namespace OrdersService.Controllers;
 
+[Authorize("api")]
 [ApiController]
 [Produces("application/json")]
 [Route("orders")]

@@ -5,6 +5,8 @@ using Prometheus;
 using Microsoft.EntityFrameworkCore;
 using OrdersService.Data;
 using OrdersService.Data.Repositories;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +26,24 @@ else
 builder.Services.AddSingleton(cfg);
 
 builder.Services.AddDbContext<OrdersServiceContext>(options => options.UseInMemoryDatabase(databaseName: "OrdersService"));
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        cfgSection.Bind("Oidc", options);
+
+        options.RequireHttpsMetadata = false;
+        options.RefreshOnIssuerKeyNotFound = true;
+    });
+
+builder.Services.AddAuthorization(config =>
+{
+    config.AddPolicy("api", builder =>
+    {
+        builder.RequireAuthenticatedUser();
+        builder.RequireScope("api");
+    });
+});
 
 builder.Services.AddScoped<IOrdersRepository, OrdersRepository>();
 builder.Services.AddScoped<DaprClient>(_ => new DaprClientBuilder().Build()!);
@@ -53,9 +73,11 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
 app.MapMetrics();
 app.UseHttpMetrics();
 

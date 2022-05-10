@@ -5,6 +5,7 @@
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
   </PropertyGroup>
 
+  <PropertyGroup Condition=" '$(RunConfiguration)' == 'IdentityServer4Demo' " />
   <ItemGroup>
     <PackageReference Include="IdentityServer4" Version="4.0.3" />
     
