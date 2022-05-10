@@ -1,28 +1,31 @@
 ﻿using System.Text.Json;
 using Gateway.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Gateway.Controllers;
 
+[Authorize("api")] // TODO: use different scopes for OrderMonitor API and Orders API
 [ApiController]
 [Route("orders")]
 public class OrdersController : ControllerBase
 {
     private readonly int _daprHttpPort;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public OrdersController(IConfiguration configuration)
+    public OrdersController(IConfiguration configuration, IHttpClientFactory httpClientFactory)
     {
         _daprHttpPort = configuration.GetValue<int>("DAPR_HTTP_PORT");
+        _httpClientFactory = httpClientFactory;
     }
     
-    // GET
     [HttpGet]
     [Route("monitor")]
     public async Task<IActionResult> GetOrderMonitorDataAsync()
     {
-        var client = new HttpClient();
-        var getOrders = client.GetFromJsonAsync<List<JsonElement>>(BuildUrl("orders", "orders"));
-        var getProducts = client.GetFromJsonAsync<List<JsonElement>>(BuildUrl("products", "products"));
+        var httpClient = _httpClientFactory.CreateClient("ordermonitor");
+        var getOrders = httpClient.GetFromJsonAsync<List<JsonElement>>(BuildUrl("orders", "orders"));
+        var getProducts = httpClient.GetFromJsonAsync<List<JsonElement>>(BuildUrl("products", "products"));
 
         var res = await Task.WhenAll(getOrders, getProducts);
         var orders = res[0];

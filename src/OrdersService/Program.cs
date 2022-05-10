@@ -66,6 +66,7 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
+
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();

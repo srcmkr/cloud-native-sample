@@ -1,6 +1,8 @@
 ﻿using System.IO.Compression;
 using Gateway.Configuration;
 using Gateway.TransformProviders;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.OpenApi.Models;
 using Prometheus;
@@ -22,6 +24,7 @@ else
 }
 
 builder.Services.AddSingleton(cfg);
+
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
@@ -44,7 +47,32 @@ builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection(cfg.ConfigSection)) 
     .AddTransforms<DaprTransformProvider>();
 
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        cfgSection.Bind("Oidc", options);
+
+        options.RequireHttpsMetadata = false;
+        options.RefreshOnIssuerKeyNotFound = true;
+    });
+
+builder.Services.AddAuthorization(config =>
+{
+    config.AddPolicy("api", builder =>
+    {
+        builder.RequireAuthenticatedUser();
+        builder.RequireScope("api");
+    });
+});
+
 builder.Services.AddControllers();
+
+builder.Services.AddHeaderPropagation(o =>
+{
+    o.Headers.Add("Authorization");
+});
+
+builder.Services.AddHttpClient("ordermonitor").AddHeaderPropagation();
 
 builder.Services.AddSwaggerGen(c =>
 {
@@ -71,10 +99,16 @@ app.UseSwaggerUI();
 
 app.UseResponseCompression();
 app.UseCors(CorsPolicyName);
+
 app.MapReverseProxy();
 
 app.MapMetrics();
 app.UseHttpMetrics();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.UseHeaderPropagation();
 
 app.MapControllers();
 
