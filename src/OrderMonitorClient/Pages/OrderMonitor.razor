@@ -2,6 +2,9 @@
 
 @using OrderMonitorClient.Services
 @using Gateway.Models
+@using Microsoft.AspNetCore.Authorization
+
+@attribute [Authorize]
 
 @inject OrderMonitorService _orderMonitorService
 
