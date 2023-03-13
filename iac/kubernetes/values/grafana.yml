@@ -1,0 +1,42 @@
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - cn-grafana.thinktecture-demos.com
+  tls:
+    - secretName: grafanatls
+      hosts:
+        - cn-grafana.thinktecture-demos.com
+
+deploymentStrategy:
+  type: Recreate
+
+persistence:
+  enabled: true
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus (Cloud-Native Sample)
+        uid: cnprometheus
+        type: prometheus
+        url: ${prometheus_endpoint}
+        access: proxy
+        isDefault: true
+        editable: true
+      - name: Grafana Loki (Cloud-Native Sample)
+        uid: cnloki
+        type: loki
+        url: ${loki_endpoint}
+        access: proxy
+        editable: true
+      - name: Zipkin (Cloud-Native Sample)
+        uid: cnzipkin
+        type: zipkin
+        url: ${zipkin_endpoint}
+        access: proxy
+        editable: true
+        

@@ -1,7 +1,11 @@
-﻿using Microsoft.OpenApi.Models;
+﻿using Microsoft.Extensions.Logging.Console;
+using Microsoft.OpenApi.Models;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using ProductsService.Configuration;
 using ProductsService.Data.Repositories;
-using Prometheus;
+using ProductsService.Migrations;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,22 +17,33 @@ if (cfgSection == null || !cfgSection.Exists())
     throw new ApplicationException(
         $"Could not find service config. Please provide a '{ProductsServiceConfiguration.SectionName}' config section");
 }
-else
-{
-    cfgSection.Bind(cfg);
-}
-
+cfgSection.Bind(cfg);
 builder.Services.AddSingleton(cfg);
-builder.Services.AddScoped<IProductsRepository>(serviceProvider =>
-{
-    var c = serviceProvider.GetRequiredService<ProductsServiceConfiguration>();
+// logging
+builder.ConfigureLogging(cfg);
+// tracing
+builder.ConfigureTracing(cfg);
+// metrics
+builder.ConfigureMetrics(cfg);
 
-    if (c.UseFakeImplementation)
+// Run Database Migrations
+// This is a poor-man's migration system. It's not very robust, but it's good enough for this demo.
+// In a real-world scenario, you'd probably want to use a proper migration system like FluentMigrator.
+builder.RunMigrations(cfg);
+
+// Configure AuthN
+builder.ConfigureAuthN(cfg);
+// Configure AuthZ
+builder.ConfigureAuthZ(cfg);
+
+builder.Services.AddScoped<IProductsRepository>(services =>
+{
+    var cfg = services.GetRequiredService<ProductsServiceConfiguration>();
+    if (string.IsNullOrWhiteSpace(cfg.ConnectionString))
     {
-        var l = serviceProvider.GetRequiredService<ILogger<FakeProductsRepository>>();
-        return new FakeProductsRepository(l);
+        return new InMemoryProductsRepository(services.GetRequiredService<ILogger<InMemoryProductsRepository>>());
     }
-    throw new NotFiniteNumberException("No live implementation here yet...");
+    return new ProductsRepository(cfg, services.GetRequiredService<ILogger<ProductsRepository>>());
 });
 
 builder.Services.AddHealthChecks();
@@ -57,12 +72,17 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
+app.MapControllers()
+    .RequireAuthorization("RequiresApiScope");
 
-app.MapMetrics();
-app.UseHttpMetrics();
+if (cfg.ExposePrometheusMetrics)
+{
+    Console.WriteLine("Registering Prometheus scraping endpoint");
+    app.UseOpenTelemetryPrometheusScrapingEndpoint();
+}
 
 app.MapHealthChecks("/healthz/readiness");
 app.MapHealthChecks("/healthz/liveness");

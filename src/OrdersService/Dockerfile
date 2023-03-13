@@ -1,13 +1,28 @@
-FROM mcr.microsoft.com/dotnet/aspnet:6.0-focal AS base
+ARG mode=debug
+
+FROM mcr.microsoft.com/dotnet/aspnet:7.0 AS base
 WORKDIR /app
-EXPOSE 5002
+EXPOSE 5000
+ENV ASPNETCORE_URLS=http://+:5000
 
-ENV ASPNETCORE_URLS=http://+:5002
-
+FROM base AS base-release
 RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
 USER appuser
 
-FROM mcr.microsoft.com/dotnet/sdk:6.0-focal AS build
+FROM base AS base-debug
+WORKDIR /remote_debugger
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+            unzip curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -sSL https://aka.ms/getvsdbgsh --output install_vs_dbg.sh
+
+RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app /remote_debugger
+USER appuser
+RUN chmod +x install_vs_dbg.sh && ./install_vs_dbg.sh -v latest -l /remote_debugger
+
+FROM mcr.microsoft.com/dotnet/sdk:7.0 AS build
 WORKDIR /src
 COPY ["OrdersService.csproj", "./"]
 RUN dotnet restore "OrdersService.csproj"
@@ -18,7 +33,7 @@ RUN dotnet build "OrdersService.csproj" -c Release -o /app/build
 FROM build AS publish
 RUN dotnet publish "OrdersService.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-FROM base AS final
+FROM base-${mode} AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "OrdersService.dll"]

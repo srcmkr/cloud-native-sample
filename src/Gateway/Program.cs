@@ -1,48 +1,44 @@
-﻿using System.IO.Compression;
-using Gateway.Configuration;
+﻿using Gateway.Configuration;
 using Gateway.TransformProviders;
-using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.OpenApi.Models;
-using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
-
-const string CorsPolicyName = "GatewayPolicy";
 
 var cfg = new GatewayConfiguration();
 var cfgSection = builder.Configuration.GetSection(GatewayConfiguration.SectionName);
 
 if (cfgSection == null || !cfgSection.Exists())
 {
-    throw new ApplicationException($"Could not find Gateway configuration. Please ensure a '{GatewayConfiguration.SectionName}' exists");
+    throw new ApplicationException(
+        $"Could not find Gateway configuration. Please ensure a '{GatewayConfiguration.SectionName}' exists");
 }
-else
-{
-    cfgSection.Bind(cfg);
-}
-
+cfgSection.Bind(cfg);
 builder.Services.AddSingleton(cfg);
-builder.Services.AddResponseCompression(options =>
-{
-    options.EnableForHttps = true;
-    options.Providers.Clear();
-    options.Providers.Add(new GzipCompressionProvider(new GzipCompressionProviderOptions
-    {
-        Level = CompressionLevel.Fastest
-    }));
-});
 
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy(CorsPolicyName, b =>
-    {
-        b.AllowAnyHeader().AllowAnyMethod().WithOrigins(cfg.CorsOrigins);
-    });
-});
+// logging
+builder.ConfigureLogging(cfg);
+// traces
+builder.ConfigureTracing(cfg);
+// metrics
+builder.ConfigureMetrics(cfg);
 
+var logger = builder.Logging.Services.BuildServiceProvider().GetRequiredService<ILogger<Program>>();
+
+// gateway features
+Gateway.Features.ResponseCompression.Add(builder);
+Gateway.Features.Cors.Add(builder, cfg);
+Gateway.Features.HeaderPropagation.Add(builder);
+logger.LogInformation("Middlewares: HTTP Header Propagation activated for {HeaderNames}", string.Join(",",
+Gateway.Features.HeaderPropagation.PropagatedHeaders));
+Gateway.Features.RateLimiting.Add(builder, cfg);
+
+// Reverse Proxy
+logger.LogInformation("ReverseProxy: Loading Reverse Proxy configuration from {Section}", cfg.ConfigSection);
 builder.Services.AddReverseProxy()
-    .LoadFromConfig(builder.Configuration.GetSection(cfg.ConfigSection)) 
+    .LoadFromConfig(builder.Configuration.GetSection(cfg.ConfigSection))
     .AddTransforms<DaprTransformProvider>();
+logger.LogInformation("ReverseProxy: Custom {TypeName} Transform has been registered", nameof(DaprTransformProvider));
+
 
 builder.Services.AddControllers();
 
@@ -66,19 +62,31 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
+logger.LogInformation("Activating Middlewares");
 app.UseSwagger();
 app.UseSwaggerUI();
+logger.LogInformation(" - Swagger and SwaggerUI activated");
 
-app.UseResponseCompression();
-app.UseCors(CorsPolicyName);
-app.MapReverseProxy();
-
-app.MapMetrics();
-app.UseHttpMetrics();
-
-app.MapControllers();
-
+Gateway.Features.ResponseCompression.Use(app);
+logger.LogInformation(" - Response Compression activated");
+Gateway.Features.Cors.Use(app);
+logger.LogInformation(" - CORS activated");
+Gateway.Features.HeaderPropagation.Use(app);
+logger.LogInformation(" - HTTP Header propagation activated");
 app.MapHealthChecks("/healthz/readiness");
+logger.LogInformation(" - HealthProbe (readiness) activated");
+if (cfg.ExposePrometheusMetrics)
+{
+    app.UseOpenTelemetryPrometheusScrapingEndpoint();
+    logger.LogInformation(" - Prometheus Scraping activated");
+}
+app.UseRateLimiter();
+logger.LogInformation(" - Rate Limiter activated");
 app.MapHealthChecks("/healthz/liveness");
-
+logger.LogInformation(" - HealthProbe (liveness) activated");
+app.MapReverseProxy();
+logger.LogInformation(" - Reverse Proxy activated");
+app.MapControllers();
+logger.LogInformation(" - API Controllers activated");
+logger.LogInformation("All middlewares activated");
 app.Run();

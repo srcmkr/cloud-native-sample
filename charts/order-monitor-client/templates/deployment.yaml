@@ -34,17 +34,22 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - name: http
-              containerPort: 80
+            - name: http-omc
+              containerPort: {{ .Values.containerPort }}
               protocol: TCP
           livenessProbe:
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 3
             httpGet:
               path: /index.html
-              port: http
+              port: http-omc
           readinessProbe:
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
             httpGet:
               path: /index.html
-              port: http
+              port: http-omc
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

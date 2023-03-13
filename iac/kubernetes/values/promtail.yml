@@ -1,0 +1,39 @@
+config:
+  snippets:
+    pipelineStages:
+    - match:
+        selector: '{container=~"(shipping|order-monitor-service)"}'
+        stages:
+        - cri: {}
+        - logfmt:
+            mapping:
+              httpMethod: method
+              httpPath: path
+              severity: level
+              statusCode: statusCode
+              timestamp: time
+              message: msg
+        - labels:
+            httpMethod: null
+            httpPath: null
+            severity: null
+            statusCode: null
+            timestamp: null
+            message: null
+        - static_labels: 
+            language: "Go"
+    - match:
+        selector: '{container=~"(orders|authentication|products|gateway|notification|price-watcher|price-drop-notifier)"}'
+        stages:
+        - cri: {}
+        - json:
+            expressions:
+              dotNetNamespace: Category
+              severity: LogLevel
+              message: Message
+        - labels:
+            dotNetNamespace: null
+            severity: null
+            message: null
+        - static_labels:
+            language: ".NET"

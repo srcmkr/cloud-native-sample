@@ -5,6 +5,11 @@ metadata:
   labels:
     {{- include "products.labels" . | nindent 4 }}
 spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
@@ -33,19 +38,43 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: ProductsService__ConnectionString
+              valueFrom:
+                secretKeyRef:
+                  name: databases
+                  key: products
+                  optional: false
+            - name: ProductsService__IdentityServer__Authority
+              valueFrom:
+                configMapKeyRef:
+                  name: authentication
+                  key: authority
+                  optional: true
+            - name: ProductsService__ExposePrometheusMetrics
+              value: {{ .Values.exposePrometheusMetrics | quote }}
+            - name: ProductsService__ZipkinEndpoint
+              valueFrom:
+                configMapKeyRef:
+                  name: zipkin
+                  key: endpoint
           ports:
-            - name: http
+            - name: http-products
               containerPort: {{ .Values.containerPort }}
               protocol: TCP
           livenessProbe:
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30
+            timeoutSeconds: 3
+            periodSeconds: 20
             httpGet:
               path: /healthz/liveness
-              port: http
+              port: http-products
           readinessProbe:
+            initialDelaySeconds: 20
+            timeoutSeconds: 3
             httpGet:
               path: /healthz/readiness
-              port: http
+              port: http-products
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

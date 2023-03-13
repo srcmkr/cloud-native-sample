@@ -1,12 +1,15 @@
+using System.Text.Json.Serialization;
+
 namespace NotificationService.Models;
 
 public class DispatchedOrder
 {
-    public Guid OrderId { get; set; }
-    public Guid UserId { get; set; }
+    [JsonPropertyName("orderId")]
+    public string OrderId { get; set; }
+
+    [JsonPropertyName("userId")]
+    public string UserId { get; set; }
+    [JsonPropertyName("userName")]
+    public string UserName { get; set; }
 }
 
-public class CloudEvent<T>
-{
-    public T Data { get; set; }
-} 

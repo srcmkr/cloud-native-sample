@@ -1,112 +1,99 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"os"
-	"strconv"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/penglongli/gin-metrics/ginmetrics"
-	"github.com/sirupsen/logrus"
+	"github.com/thinktecture-labs/cloud-native-sample/shipping-service/pkg/cloudevents"
+	"github.com/thinktecture-labs/cloud-native-sample/shipping-service/pkg/dapr"
 	"github.com/thinktecture-labs/cloud-native-sample/shipping-service/pkg/shipping"
-	ginlogrus "github.com/toorop/gin-logrus"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/zipkin"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-)
 
-type cloudEvent struct {
-	Id   string
-	Data shipping.Order
-}
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"go.opentelemetry.io/otel"
+)
 
 const (
-	defaultPort = 5003
+	serviceName = "ShippingService"
 )
 
+var tracer = otel.Tracer(serviceName)
+
 func main() {
+	cfg := getConfig()
+
+	r := gin.New()
+	log := configureLogging(r, cfg)
+
+	configureMetrics(r)
+	tp, err := configureTracing(cfg)
+	if err != nil {
+		log.Fatalf("Error while configuring tracing: %s", err)
+	}
+	if tp != nil {
+		defer func() {
+			if err := tp.Shutdown(context.Background()); err != nil {
+				log.Printf("Error shutting down tracer provider: %v", err)
+			}
+		}()
+	}
+
+	dontTrace := otelgin.WithFilter(func(r *http.Request) bool {
+		urls := []string{"/healthz/readiness", "/healthz/liveness", "/metrics"}
+		// return false if request url is in the list
+		for _, url := range urls {
+			if r.URL.Path == url {
+				return false
+			}
+		}
+		return true
+	})
+
+	r.Use(otelgin.Middleware(serviceName, dontTrace))
+	r.Use(gin.Recovery())
+	r.GET("/dapr/subscribe", dapr.GetSubscriptionHandler(cfg))
+
+	r.POST("/orders", dapr.ValidateApiToken(log), func(ctx *gin.Context) {
+		_, span := tracer.Start(ctx.Request.Context(), "process_order")
+		defer span.End()
+		var envelope cloudevents.CloudEvent
+		if err := ctx.BindJSON(&envelope); err != nil {
+			log.Warnf("BadRequest - Error while binding JSON to CloudEvent %s", err)
+			ctx.AbortWithStatus(400)
+			return
+		}
+		log.Infof("Processing CloudEvent of type %s (id %s)", envelope.Type, envelope.Id)
+		s := shipping.NewShipping(cfg, log)
+		traceId := span.SpanContext().TraceID().String()
+		if err = s.ProcessOrder(&envelope.Data, traceId); err != nil {
+			ctx.AbortWithStatus(500)
+			return
+		}
+		// we must send at least! an empty JSON object, otherwise dapr component will treat response incorrectly and log
+		// skipping status check due to error parsing result from pub/sub event
+		// https://github.com/dapr/dapr/issues/2235
+		ctx.JSON(200, dapr.DaprResponse{})
+	})
+	healthz := r.Group("/healthz")
+	healthz.GET("/readiness", ok)
+	healthz.GET("/liveness", ok)
+
+	log.Infof("Starting shipping service on port %d", cfg.Port)
+	if err := r.Run(fmt.Sprintf(":%d", cfg.Port)); err != nil {
+		log.Fatalf("Error while running gin: %s", err)
+	}
+}
+
+func ok(c *gin.Context) {
+	c.Status(200)
+}
+
+func getConfig() *shipping.Configuration {
 	cfg, err := shipping.LoadConfiguration()
 	if err != nil {
 		log.Fatalf("Error while reading configuration: %s", err)
 	}
-	log := logrus.New()
-	log.SetOutput(os.Stdout)
-	log.SetLevel(logrus.DebugLevel)
-	if cfg.Mode == "Release" {
-		log.Infoln("Will run shipping service in release mode.")
-		gin.SetMode(gin.ReleaseMode)
-	}
-	r := gin.New()
-	//todo: extract to dedicated func
-	m := ginmetrics.GetMonitor()
-	m.SetMetricPath("/metrics")
-	m.Use(r)
-
-	/*tp := getTraceProvider()
-	defer func() {
-		if err := tp.Shutdown(context.Background()); err != nil {
-			log.Printf("Error shutting down tracer provider: %v", err)
-		}
-	}()
-	r.Use(otelgin.Middleware("notification"))
-	*/
-	r.Use(ginlogrus.Logger(log), gin.Recovery())
-	//todo: rename route to ship or process
-	r.POST("/orders", func(ctx *gin.Context) {
-		var orderEnvelope cloudEvent
-		if err := ctx.BindJSON(&orderEnvelope); err != nil {
-			ctx.AbortWithStatus(400)
-			return
-		}
-		log.Infof("Processing CloudEvent with id %s", orderEnvelope.Id)
-		s := shipping.NewShipping(cfg, log)
-		if err = s.ProcessOrder(&orderEnvelope.Data); err != nil {
-			ctx.AbortWithStatus(500)
-			return
-		}
-		// ctx.Status(200)
-		// we must send at least! an empty JSON object, otherwise dapr component will treat response incorrectly and log
-		// skipping status check due to error parsing result from pub/sub event
-		// https://github.com/dapr/dapr/issues/2235
-		ctx.JSON(200, daprResponse{})
-
-	})
-	r.GET("/healthz/readiness", func(ctx *gin.Context) {
-		ctx.Status(200)
-	})
-	r.GET("/healthz/liveness", func(ctx *gin.Context) {
-		ctx.Status(200)
-	})
-	p := getPort()
-	r.Run(fmt.Sprintf(":%d", p))
-}
-
-func getTraceProvider() *sdktrace.TracerProvider {
-	exporter, err := zipkin.New(os.Getenv("ZIPKIN_ENDPOINT"))
-	if err != nil {
-		fmt.Errorf("Could not create zipkin exporter %s", err)
-		os.Exit(1)
-	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithBatcher(exporter),
-	)
-	otel.SetTracerProvider(tp)
-	return tp
-}
-
-type daprResponse struct {
-}
-
-func getPort() int {
-	p := os.Getenv("PORT")
-	if len(p) == 0 {
-		return defaultPort
-	}
-	port, err := strconv.Atoi(p)
-	if err != nil {
-		return defaultPort
-	}
-	return port
+	return cfg
 }

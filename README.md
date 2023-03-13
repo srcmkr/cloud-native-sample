@@ -1,72 +1,119 @@
-# Cloud-native Sample Application - (Work-in-Progress)
+# Cloud-Native Sample Application
 
-*Note*: This is heavy work in progress - do not rely on the things you see here, yet ;-)
+This repository contains a sample application that serves as a demonstration for building and automating a polyglot cloud-native application. The application is designed to showcase proven practices for developing and deploying cloud-native software using a combination of programming languages and tools:
 
-[TBD: Some general introduction...]
+* Programming Languages
+  * .NET (C#)
+  * Go
+
+* Tools
+  * Docker
+  * Docker Compose
+  * Dapr (Distributed Application Runtime)
+  * Kubernetes (when running in Azure)
+  * HashiCorp Terraform
+  * GitHub Actions
+  * Makefiles
+
+[TBD: Some general introduction.]
+
+## Builds
+
+![AuthenticationService](https://img.shields.io/github/actions/workflow/status/thinktecture-labs/cloud-native-sample/cn.authn.ci.yml?branch=main&label=Authentication%20Service&logo=github) ![OrdersService](https://img.shields.io/github/actions/workflow/status/thinktecture-labs/cloud-native-sample/cn.orders.ci.yml?branch=main&label=Orders%20Service&logo=github) ![ProductsService](https://img.shields.io/github/actions/workflow/status/thinktecture-labs/cloud-native-sample/cn.products.ci.yml?branch=main&label=Products%20Service&logo=github) ![ShippingService](https://img.shields.io/github/actions/workflow/status/thinktecture-labs/cloud-native-sample/cn.shipping.ci.yml?branch=main&label=Shipping%20Service&logo=github) ![OMC](https://img.shields.io/github/actions/workflow/status/thinktecture-labs/cloud-native-sample/cn.order-monitor-client.ci.yml?branch=main&label=Order%20Monitor%20Client&logo=github) ![OrderMonitorService](https://img.shields.io/github/actions/workflow/status/thinktecture-labs/cloud-native-sample/cn.authn.ci.yml?branch=main&label=Order%20Monitor%20Service&logo=github) ![Gateway](https://img.shields.io/github/actions/workflow/status/thinktecture-labs/cloud-native-sample/cn.gateway.ci.yml?branch=main&label=Gateway&logo=github)
+
+## License
+
+[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 
 ## Application Diagram
 
-### Order Monitor Client
+![Architecture Overview](assets/architecture-overview.jpg)
 
-```mermaid
-flowchart TD
+## Observability Stack
 
-    A[Browse Order Monitor Client] --> B{Is Authenticated?};
-    B -- yes --> F[Call API Gateway];
-    B -- no --> D[Authentication Service];
-    D -- http --> E[Authenticate with Azure AD];
-    E -- token --> D;
-    D -- token --> A;
-    F -- http --> G[Order Service]
-    F -- http --> H[Products Service]
-```
+For the scope of this application, we've choosen the following technologies to address observability concerns:
 
-### Create an order with Postman
+* Metrics: [Prometheus](https://prometheus.io)
+* Distributed Tracing: [Zipkin](https://zipkin.io)
+* Logs: [Grafana Loki](https://grafana.com/oss/loki/)
+* Visualization: [Grafana](https://grafana.com/grafana/)
 
-```mermaid
-flowchart TD
-A[Create Order] -- with token --> B[Call API Gateway];
-    B -- http --> C[Order Service];
-    C -- mqtt --> D[RabbitMQ];
-    D -- mqtt --> E[Shipping Service];
-    D -- mqtt --> F[Notification Service];
-    F -- ws --> G[Order Management Client];
-```
+## Local execution
 
-## Docker Compose
+We decided to go with Docker Compose for local development story. As an alternative, you can also setup a local Kubernetes cluster (KIND / minikube /...).
 
 ### URLs and demo credentials
 
-* Frontend
-  * [http://localhost:5005](http://localhost:5005)
-* Authentication
+When running the application in Docker Compose, you'll end up with the following ports forwarded on your host machine:
+
+* Frontend: Order Monitor Client (OMC)
+  * [http://localhost:5000](http://localhost:5000)
+* Authentication Service (IdSrv)
   * [http://localhost:5009](http://localhost:5009)
+  * Credentials (`bob:bob`)
 * Gateway
-  * Root: [http://localhost:5000](http://localhost:5000)
+  * Root: [http://localhost:5000](http://localhost:5000) -> Serves the Frontend (OMC)
   * Swagger (Products Service): [http://localhost:5000/products/swagger/](http://localhost:5000/products/swagger/)
   * Swagger (Orders Service): [http://localhost:5000/orders/swagger/](http://localhost:5000/orders/swagger/)
 * Grafana
   * [http://localhost:3000](http://localhost:3000)
   * Username: `admin`
   * Password: `admin`
+* Prometheus
+  * [http://localhost:9090](http://localhost:9090)
+* Alertmanager
+  * [http://localhost:9093](http://localhost:9093)
 * Zipkin
   * [http://localhost:9411](http://localhost:9411)
-* Jaeger
-  * [http://localhost:16686](http://localhost:16686)
 * RabbitMQ
   * [http://localhost:15672](http://localhost:15672)
   * Username: `guest`
   * Password: `guest`
-* Note: Dapr dashboard does currently not work in Docker compose mode
 
-### Necessary installation for Docker Compose-based setup
+**Use [http://localhost:5000](http://localhost:5000) to access the OMC proxied through the gateway locally.**
+
+Note: *Dapr-dashboard does currently not work in Docker compose mode*
+
+### Necessary plugins for local execution
+
+We use Loki as log aggregation system. In the local environment, we leverage lokis docker plugin to ship all logs from containers output streams (`STDOUT` and `STDERR`) to Loki.
 
 ```bash
 # Install Docker Plugin for Loki
 docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
 ```
 
-### Common Docker Compose commands
+### Local Environment Execution using the Makefile
+
+Find the `Makefile` in the root of the repository. Use it to perform common tasks as shown below:
+
+```bash
+
+# Install loki plugin locally
+make init
+
+# Start the sample locally (in docker)
+make start 
+
+# Quickstart (no image build) the sample locally (in docker)
+make quickstart
+
+# get logs
+make logs
+
+# stop the sample
+make stop
+
+# clean-up the local docker environment
+## stops everything
+## removes images
+## removes volumes
+## removes orphan containers
+## removes custom docker network
+make cleanup
+```
+
+### Local Environment Execution using the docker-compose CLI
 
 ```bash
 # Build Container images
@@ -84,7 +131,7 @@ docker-compose up
 docker-compose logs
 ```
 
-### Cleanup environment
+#### Cleanup environment
 
 ```bash
 # remove running containers
@@ -97,74 +144,18 @@ docker network rm cloud-native -f
 docker plugin rm loki -f
 ```
 
+### Local Environment Execution using the `cn-sample` CLI
+
+You can also automate the local environment execution using the `cn-sample` CLI (see `/tools/<your_platform>`).
+
+Consider adding `cn-sample` to your path before invoking it.
+
+The `sn-sample` CLI is designed to be invoked from the root directory of this repository.
+
 ## Azure environment
-### Azure Service Bus
-When using Azure SB as a message broker, make sure to have at least a Standard tier in place for topics support (Basic will not work).
 
-Please add your own SAS connection string in the .yaml file for SB.
+For demonstration purposes, we added all necessary Infrastructure-as-Code (IaC) (using [HashiCorp Terraform](https://terraform.io)) and corresponding [GitHub Actions](./github/workflows) to deploy and run the application in Microsoft Azure leveraging Azure Kubernetes Service (AKS).
 
-## Tools
+When running in the cloud, one must always decide on **Run vs. Rent**. For example: Instead of running a message broker like [RabbitMQ](https://www.rabbitmq.com/) on your own (yes, running something in a container means you run it on your own, because you've to maintain and troubleshoot it), and renting a message broker like [Azure Service Bus](https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-bus-messaging-overview).
 
-### Load-Testing with Hey
-
-[Hey](https://github.com/rakyll/hey) is a portable load tester
-
-```bash
-brew install hey
-
-hey -c 1 -n 1000 http://localhost:5000/products
-```
-
-## [Archived] Self-hosting application services with Dapr
-
-### Start Services
-
-### OrdersService
-
-```bash
-cd src/OrdersService
-dapr run --app-id orders --app-port 5002 --dapr-http-port 9002 --dapr-grpc-port 10002 --components-path ../dapr/components --config ../dapr/config.yaml --log-level debug -- dotnet run
-```
-
-### NotificationService
-
-```bash
-cd src/NotificationService
-dapr run --app-id notification --app-port 5004 --dapr-http-port 9004 --dapr-grpc-port 10004 --components-path ../dapr/components --config ../dapr/config.yaml -- dotnet run
-```
-
-### ShippingService
-
-```bash
-cd src/ShippingService
-dapr run --app-id shipping --app-port 5003 --dapr-http-port 9003 --dapr-grpc-port 10003 --components-path ../dapr/components --config ../dapr/config.yaml --log-level debug -- go run ./cmd/api.go
-```
-
-### ProductsService
-
-```bash
-cd src/ProductsService
-dapr run --app-id products --app-port 5001 --dapr-http-port 9001 --dapr-grpc-port 10001 --config ../dapr/config.yaml -- dotnet run
-```
-
-### Gateway
-
-```bash
-cd src/Gateway
-dotnet run
-```
-
-### Authentication
-
-```bash
-cd src/AuthenticationService
-dotnet run
-```
-
-### Dapr Dashboard
-
-```bash
-dapr dashboard
-```
-
-Navigate to http://localhost:8080.
+Again, you can find corresponding GitHub Actions in the repository to switch between **Run** and **Rent** in Azure. Those GitHub Actions must be triggered manually.

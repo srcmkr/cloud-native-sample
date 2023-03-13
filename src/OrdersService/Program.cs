@@ -1,7 +1,6 @@
 ﻿using Dapr.Client;
 using Microsoft.OpenApi.Models;
 using OrdersService.Configuration;
-using Prometheus;
 using Microsoft.EntityFrameworkCore;
 using OrdersService.Data;
 using OrdersService.Data.Repositories;
@@ -16,14 +15,23 @@ if (cfgSection == null || !cfgSection.Exists())
     throw new ApplicationException(
         $"Could not find service config. Please provide a '{OrdersServiceConfiguration.SectionName}' config section");
 }
-else
-{
-    cfgSection.Bind(cfg);
-}
-
+cfgSection.Bind(cfg);
 builder.Services.AddSingleton(cfg);
 
-builder.Services.AddDbContext<OrdersServiceContext>(options => options.UseInMemoryDatabase(databaseName: "OrdersService"));
+// logging
+builder.ConfigureLogging(cfg);
+// tracing
+builder.ConfigureTracing(cfg);
+// metrics
+builder.ConfigureMetrics(cfg);
+
+// Configure AuthN
+builder.ConfigureAuthN(cfg);
+// Configure AuthZ
+builder.ConfigureAuthZ(cfg);
+
+builder.Services.AddDbContext<OrdersServiceContext>(options =>
+    options.UseInMemoryDatabase(databaseName: "OrdersService"));
 
 builder.Services.AddScoped<IOrdersRepository, OrdersRepository>();
 builder.Services.AddScoped<DaprClient>(_ => new DaprClientBuilder().Build()!);
@@ -52,14 +60,19 @@ var app = builder.Build();
 
 app.UseSwagger();
 app.UseSwaggerUI();
-
+app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapMetrics();
-app.UseHttpMetrics();
+app.MapControllers()
+    .RequireAuthorization("RequiresApiScope");
 
 app.MapHealthChecks("/healthz/readiness");
 app.MapHealthChecks("/healthz/liveness");
+
+if (cfg.ExposePrometheusMetrics)
+{
+    Console.WriteLine("Registering Prometheus scraping endpoint");
+    app.UseOpenTelemetryPrometheusScrapingEndpoint();
+}
 
 app.Run();
